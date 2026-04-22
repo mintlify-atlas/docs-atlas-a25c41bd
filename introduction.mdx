@@ -1,0 +1,64 @@
+---
+title: "kiro-auto: automate AWS Builder ID account management"
+description: "kiro-auto automates AWS Builder ID account registration with Playwright and switches Kiro IDE identities by writing SSO tokens to the AWS credential cache."
+---
+
+kiro-auto is a TypeScript CLI tool that automates the full lifecycle of AWS Builder ID accounts — from batch registration using disposable email inboxes and Playwright browser automation, to injecting SSO tokens directly into Kiro IDE's credential files for instant account switching. It includes browser fingerprint spoofing, human-behavior simulation, proxy support, and Windows machine ID rotation to reduce detection.
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Node.js dependencies and the Chromium browser in minutes
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Register your first account and switch Kiro IDE identities in under 5 minutes
+  </Card>
+  <Card title="register command" icon="user-plus" href="/commands/register">
+    Full reference for all flags, concurrency options, and output formats
+  </Card>
+  <Card title="switch command" icon="arrow-right-arrow-left" href="/commands/switch">
+    Switch Kiro IDE accounts, restart the process, and reset the machine ID
+  </Card>
+</CardGroup>
+
+## What kiro-auto does
+
+kiro-auto has two primary commands:
+
+- **`npm run register`** — Batch-registers AWS Builder ID accounts. It requests a device code from the AWS OIDC endpoint, spins up a headless Chromium browser with a randomized fingerprint, obtains a disposable email address, completes the web registration form automatically, retrieves the verification code from the inbox, and polls for the resulting OAuth refresh token. Results are written to `show/builderid-template.json`.
+
+- **`npm run switch`** — Reads a previously saved account template, writes the refresh token and client credentials into `~/.aws/sso/cache/`, optionally resets the Windows machine ID (MachineGuid), and restarts the Kiro IDE process so the new identity takes effect immediately.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Playwright automation" icon="browser">
+    Headless Chromium drives the AWS registration form with simulated mouse movement, realistic typing delays, and page scroll behavior.
+  </Card>
+  <Card title="Disposable email inboxes" icon="envelope">
+    Automatically creates and polls temporary inboxes across six providers: tempmail.lol, 1secmail, mail.tm, tempmail.plus, guerrillamail, and 215.im.
+  </Card>
+  <Card title="Browser fingerprint spoofing" icon="fingerprint">
+    Randomizes Canvas, WebGL, Navigator, Screen, Timezone, and hardware concurrency values to reduce bot detection.
+  </Card>
+  <Card title="Machine ID rotation" icon="rotate">
+    Resets the Windows MachineGuid registry key to make the system appear as a new device to AWS.
+  </Card>
+  <Card title="Configurable concurrency" icon="bolt">
+    Run multiple registration tasks in parallel with tunable concurrency, per-task delay, and proxy routing.
+  </Card>
+  <Card title="Interactive CLI menus" icon="terminal">
+    Both commands offer interactive menus for users who prefer guided workflows over flags.
+  </Card>
+</CardGroup>
+
+## Requirements
+
+| Requirement | Version |
+|---|---|
+| Node.js | >= 18.0.0 |
+| npm | >= 9.x |
+| Operating system | Windows 10/11 recommended; macOS and Linux supported for registration |
+
+<Warning>
+Machine ID reset (`--reset-machine-id`) is only supported on Windows and requires administrator privileges.
+</Warning>

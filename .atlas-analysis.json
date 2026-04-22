@@ -1,0 +1,80 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "kiro-auto",
+  "projectDescription": "A CLI automation tool for batch-registering AWS Builder ID accounts and switching Kiro IDE accounts with browser fingerprint spoofing and machine ID reset support.",
+  "theme": "luma",
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Commands",
+            "pages": [
+              "commands/register",
+              "commands/switch"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/options",
+              "configuration/proxy",
+              "configuration/fingerprint"
+            ]
+          },
+          {
+            "group": "How It Works",
+            "pages": [
+              "internals/registration-flow",
+              "internals/account-switching",
+              "internals/temp-mail",
+              "internals/machine-id"
+            ]
+          },
+          {
+            "group": "Troubleshooting",
+            "pages": [
+              "troubleshooting/common-errors",
+              "troubleshooting/faq"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Automated AWS Builder ID account registration via Playwright browser automation",
+    "Temporary email inbox integration (tempmail.lol, 1secmail, mail.tm, guerrillamail, 215.im)",
+    "Browser fingerprint spoofing (Canvas, WebGL, Navigator, Screen, Timezone)",
+    "Batch registration with configurable concurrency and delay",
+    "Interactive CLI menus for both registration and account switching",
+    "Kiro IDE process management (kill, start, restart)",
+    "AWS SSO token file injection for seamless account switching",
+    "Windows machine ID (MachineGuid) reset for device fingerprint rotation",
+    "Proxy support for HTTP/HTTPS traffic routing",
+    "Anti-detection mechanisms: human-like mouse movement, input delays, page scroll simulation"
+  ],
+  "publicApiSurface": [
+    "npm run register -- [--count N] [--concurrency N] [--delayMs N] [--proxyUrl URL] [--no-fingerprint] [--no-incognito] [--non-interactive]",
+    "npm run switch -- [--template PATH] [--region REGION] [--index N] [--restart] [--reset-machine-id] [--dry-run]",
+    "npm run install-browser",
+    "startBuilderIdDeviceLogin(region: string): Promise<BuilderIdStartResult>",
+    "pollBuilderIdDeviceAuth(params): Promise<BuilderIdPollResult>",
+    "registerAwsBuilderIdTempMail(options): Promise<RegisterResult>",
+    "createTempMail(log, timeout): Promise<{ email, token, password } | null>",
+    "getTempMailCode(token, email, log, timeout): Promise<string | null>",
+    "autoRegisterAWS(email, refreshToken, clientId, log, ...): Promise<RegisterResult>"
+  ]
+}

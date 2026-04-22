@@ -1,0 +1,78 @@
+---
+title: "Route kiro-auto browser and API traffic through a proxy"
+description: "Configure an HTTP or HTTPS proxy in kiro-auto to route both browser automation and AWS API requests through a single proxy server."
+---
+
+kiro-auto supports routing all outbound traffic — both the Playwright-controlled browser and the `fetch()` calls that talk to the AWS device authorization endpoint — through a single proxy server. This is useful when registering multiple accounts, where repeated requests from the same IP address can trigger rate limiting or CAPTCHA challenges.
+
+## Setting the proxy
+
+Pass `--proxyUrl` (or its alias `--proxy`) to the `register` command with an HTTP or HTTPS URL:
+
+<CodeGroup>
+
+```bash HTTP proxy
+npm run register -- --count 5 --proxyUrl "http://127.0.0.1:7890"
+```
+
+```bash SOCKS5 proxy
+npm run register -- --count 5 --proxyUrl "socks5://127.0.0.1:1080"
+```
+
+```bash With authentication
+npm run register -- --count 3 --proxyUrl "http://user:password@proxy.example.com:8080"
+```
+
+</CodeGroup>
+
+## How proxy routing works
+
+When `--proxyUrl` is set, kiro-auto applies it in two places:
+
+**1. Environment variables for `fetch()` requests**
+
+Before each registration task runs, the tool sets the standard proxy environment variables so that Node.js HTTP requests — including the AWS Builder ID device authorization API calls — go through the proxy:
+
+```typescript
+process.env.HTTP_PROXY  = proxyUrl
+process.env.HTTPS_PROXY = proxyUrl
+process.env.http_proxy  = proxyUrl
+process.env.https_proxy = proxyUrl
+```
+
+**2. Playwright browser launch options**
+
+The Chromium instance is launched with Playwright's built-in `proxy` option, so all browser traffic also routes through the same server:
+
+```typescript
+await chromium.launch({
+  proxy: { server: proxyUrl }
+})
+```
+
+Both paths use the same proxy URL, so you only need to configure one value.
+
+## Interactive menu
+
+In the interactive menu (launched with `npm run register`), option **[8]** lets you set or clear the proxy during the session without restarting the tool:
+
+```
+[8] 设置代理 (不想被追踪就设一个)
+```
+
+Enter a URL to activate the proxy, or press Enter with no input to clear it and revert to a direct connection.
+
+## Recommendations
+
+<Tip>
+Use a proxy when registering more than a handful of accounts in a single session. Rate limiting from the AWS authorization endpoint becomes more likely as request volume increases.
+</Tip>
+
+<Warning>
+The `switch` command does **not** accept a proxy flag. Account switching only reads and writes local files (SSO cache at `~/.aws/sso/cache/`) and does not make outbound network requests, so no proxy configuration is needed.
+</Warning>
+
+## Related options
+
+- [All register options](/configuration/options) — full flag reference including `--count` and `--concurrency`
+- [Fingerprint spoofing](/configuration/fingerprint) — combine with proxy routing for stronger bot-detection avoidance

@@ -1,0 +1,194 @@
+---
+title: "How kiro-auto writes SSO credentials to switch Kiro accounts"
+description: "kiro-auto writes Builder ID credentials to the AWS SSO cache directory so Kiro IDE picks up the new account on next startup, with optional process restart."
+---
+
+Kiro IDE reads its active Builder ID credentials from the `~/.aws/sso/cache/` directory. kiro-auto's switch script writes two JSON files into that directory — a token file and a client registration file — then optionally restarts the Kiro process so that the new credentials take effect immediately.
+
+## Account template schema
+
+Accounts are stored in `show/builderid-template.json` as a JSON array. Each entry conforms to:
+
+```typescript
+type BuilderIdTemplateItem = {
+  email?: string
+  password?: string
+  refreshToken: string  // must start with "aor"
+  clientId: string
+  clientSecret: string
+  provider?: 'BuilderId'
+}
+```
+
+The `refreshToken` field is validated at switch time: if it does not start with `"aor"`, the switch is aborted. `clientId` and `clientSecret` must also be present.
+
+## Round-robin index tracking
+
+The next account to use is tracked in `show/switch-state.json`:
+
+```json
+{ "nextIndex": 0 }
+```
+
+On each switch the picked index is `state.nextIndex % items.length`. After the switch the state is updated to `(pickIndex + 1) % items.length`. If the file does not exist, the index starts at 0.
+
+A specific account can be selected with `--index <n>`, bypassing the round-robin state.
+
+## Writing the SSO cache files
+
+<Steps>
+  <Step title="Compute the client ID hash">
+    The cache file name for client credentials is derived from the start URL:
+
+    ```typescript
+    const clientIdHash = crypto
+      .createHash('sha1')
+      .update(JSON.stringify({ startUrl }))
+      .digest('hex')
+    ```
+
+    The default `startUrl` is `https://view.awsapps.com/start`, configurable via `--startUrl`. This produces a deterministic 40-character hex string that Kiro uses to locate the matching client registration.
+  </Step>
+
+  <Step title="Back up existing files">
+    Before overwriting, both target files are copied with a timestamped `.bak.<timestamp>` suffix if they already exist:
+
+    ```typescript
+    const backupPath = `${path}.bak.${Date.now()}`
+    await copyFile(path, backupPath)
+    ```
+
+    This preserves the previous credentials so they can be restored manually if needed.
+  </Step>
+
+  <Step title="Write kiro-auth-token.json">
+    Written to `~/.aws/sso/cache/kiro-auth-token.json`:
+
+    ```json
+    {
+      "accessToken": "",
+      "refreshToken": "<refreshToken from template>",
+      "expiresAt": "<ISO timestamp, 1 hour from now>",
+      "clientIdHash": "<SHA1 hash>",
+      "authMethod": "IdC",
+      "provider": "BuilderId",
+      "region": "us-east-1"
+    }
+    ```
+
+    `accessToken` is intentionally left as an empty string; Kiro will use the `refreshToken` to obtain a fresh access token on its next startup.
+  </Step>
+
+  <Step title="Write the client registration file">
+    Written to `~/.aws/sso/cache/<clientIdHash>.json`:
+
+    ```json
+    {
+      "clientId": "<clientId from template>",
+      "clientSecret": "<clientSecret from template>",
+      "expiresAt": "<ISO timestamp, 90 days from now>",
+      "scopes": [
+        "codewhisperer:completions",
+        "codewhisperer:analysis",
+        "codewhisperer:conversations",
+        "codewhisperer:transformations",
+        "codewhisperer:taskassist"
+      ]
+    }
+    ```
+
+    The `expiresAt` timestamp uses `new Date(...).toISOString().replace('Z', '')` — note the trailing `Z` is stripped to match the format Kiro expects.
+  </Step>
+</Steps>
+
+## Kiro process management
+
+The switch script can optionally kill and restart the Kiro process so that the new credentials are loaded without manual intervention.
+
+### Detecting the Kiro process
+
+<CodeGroup>
+
+```powershell Windows
+powershell -NoProfile -Command "Get-Process | Where-Object {$_.ProcessName -like '*kiro*'} | Select-Object Id,ProcessName | ConvertTo-Json"
+```
+
+```bash macOS / Linux
+pgrep -f -i kiro
+```
+
+</CodeGroup>
+
+### Terminating the process
+
+<CodeGroup>
+
+```cmd Windows
+taskkill /PID <pid> /F
+```
+
+```bash macOS / Linux
+kill -9 <pid>
+```
+
+</CodeGroup>
+
+### Starting Kiro
+
+The script searches a set of default paths in order:
+
+<CodeGroup>
+
+```text Windows paths
+%LOCALAPPDATA%\Programs\Kiro\Kiro.exe
+%LOCALAPPDATA%\Kiro\Kiro.exe
+C:\Program Files\Kiro\Kiro.exe
+C:\Program Files (x86)\Kiro\Kiro.exe
+<PATH lookup via `where kiro`>
+```
+
+```text macOS paths
+/Applications/Kiro.app/Contents/MacOS/Kiro
+~/Applications/Kiro.app/Contents/MacOS/Kiro
+```
+
+```text Linux
+<PATH lookup via `which kiro`>
+```
+
+</CodeGroup>
+
+The process is spawned detached (`detached: true, stdio: 'ignore'`) so the switch script exits independently of Kiro.
+
+## CLI flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--template <path>` | | Path to the template file. Default: `show/builderid-template.json` |
+| `--region <region>` | | AWS region. Default: `us-east-1` |
+| `--startUrl <url>` | | Start URL used for hash computation. Default: `https://view.awsapps.com/start` |
+| `--state <path>` | | Path to switch state file. Default: `show/switch-state.json` |
+| `--index <n>` | | Pick a specific account by index instead of round-robin |
+| `--restart` | `-r` | Kill and restart Kiro after switching |
+| `--reset-machine-id` | `-m` | Reset the Windows MachineGuid before restarting |
+| `--dry-run` | | Compute and log actions without writing any files |
+| `--interactive` | `-i` | Launch the interactive menu (default when no flags are passed) |
+
+## Interactive menu
+
+Running `scripts/switch.ts` without flags opens an interactive menu with eight options:
+
+| Option | Action |
+|---|---|
+| `[1]` | Switch account only (requires manual Kiro restart) |
+| `[2]` | Switch account and restart Kiro |
+| `[3]` | Switch account, reset machine ID, and restart Kiro |
+| `[4]` | Show detailed status (template count, next index, Kiro PID, machine ID) |
+| `[5]` | Kill the Kiro process |
+| `[6]` | Start the Kiro process |
+| `[7]` | Restart Kiro without switching account |
+| `[8]` | Reset Windows machine ID only |
+
+<Note>
+The `--dry-run` flag skips all file writes and process operations, printing what would have happened instead. Useful for verifying the correct account will be selected before committing.
+</Note>

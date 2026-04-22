@@ -1,0 +1,156 @@
+---
+title: "npm run register — batch AWS Builder ID registration"
+description: "Register one or more AWS Builder ID accounts automatically. Supports batch count, concurrency, delay, proxy, fingerprint, and incognito mode flags."
+---
+
+The `register` command automates the creation of AWS Builder ID accounts using a temporary email service and a headless Chromium browser. It can register a single account interactively or run fully non-interactive batch jobs with configurable concurrency, delays, and proxy routing. On success it writes a results file and optionally a template file ready for use with the `switch` command.
+
+## Usage
+
+```bash
+npm run register [-- [flags]]
+```
+
+Pass flags after `--` to separate them from the npm invocation.
+
+## Flags
+
+<ParamField query="--count" type="number" default="1">
+  Number of accounts to register in this run. Alias: `-n`.
+</ParamField>
+
+<ParamField query="--concurrency" type="number" default="1">
+  Maximum number of registration tasks that run in parallel. Alias: `-c`.
+
+  <Note>Values above 5 may stress the host machine and increase the chance of rate limiting.</Note>
+</ParamField>
+
+<ParamField query="--delayMs" type="number" default="0">
+  Milliseconds to wait before starting each task (applied to tasks with index > 0). Aliases: `--delay`, `-d`.
+</ParamField>
+
+<ParamField query="--proxyUrl" type="string">
+  HTTP or HTTPS proxy URL applied to both the browser and the underlying `fetch` calls (e.g. `http://127.0.0.1:7890`). Alias: `--proxy`. Omit to use a direct connection.
+</ParamField>
+
+<ParamField query="--non-interactive" type="boolean" default="false">
+  Skip the interactive menu and execute immediately using the flags provided on the command line. Alias: `-y`. This flag is required when running in CI or scripted environments.
+</ParamField>
+
+<ParamField query="--no-fingerprint" type="boolean" default="false">
+  Disable browser fingerprint spoofing. By default the stealth plugin randomises browser fingerprints so each session appears to come from a distinct client. Pass this flag to use the browser's default fingerprint.
+</ParamField>
+
+<ParamField query="--no-incognito" type="boolean" default="false">
+  Disable incognito mode. By default every browser session opens in a private context so cookies and storage do not persist between accounts. Pass this flag to use a normal browser profile instead.
+</ParamField>
+
+<ParamField query="--output" type="string" default="show/results.json">
+  File path for the JSON results array written at the end of the run. The parent directory is created automatically.
+</ParamField>
+
+<ParamField query="--region" type="string" default="us-east-1">
+  AWS region used when initiating the Builder ID device-auth flow.
+</ParamField>
+
+<ParamField query="--emit-builderid-template" type="boolean" default="true">
+  Generate a `builderid-template.json` file containing only the successfully registered accounts that have a valid `refreshToken`. This file is consumed by `npm run switch`. Aliases: `--emit-builderid`, `--builderid-template`.
+
+  <Note>Template generation is enabled by default. Toggle it off with option **[7]** in the interactive menu if you do not need the file.</Note>
+</ParamField>
+
+<ParamField query="--templateOutput" type="string" default="show/builderid-template.json">
+  File path for the Builder ID template written when `--emit-builderid-template` is active.
+</ParamField>
+
+## Interactive menu
+
+When launched without `--non-interactive`, the command opens a menu-driven interface. The current configuration is shown at the top of every screen.
+
+| Key | Action |
+|-----|--------|
+| `1` | Start registration with the current settings |
+| `2` | Set the number of accounts to register |
+| `3` | Set the concurrency level |
+| `4` | Set the delay between tasks (ms) |
+| `5` | Toggle incognito mode on/off |
+| `6` | Toggle browser fingerprint spoofing on/off |
+| `7` | Toggle Builder ID template generation on/off |
+| `8` | Set or clear the proxy URL |
+| `9` | View registration history from existing output files |
+| `0` | Exit |
+
+<Tip>Any flags you pass on the command line pre-populate the corresponding settings in the interactive menu, so you can use flags to set defaults and then fine-tune from there.</Tip>
+
+## Examples
+
+<CodeGroup>
+
+```bash Single account (interactive)
+npm run register
+```
+
+```bash Batch with concurrency and proxy
+npm run register -- --count 10 --concurrency 3 --delayMs 5000 --proxyUrl "http://127.0.0.1:7890"
+```
+
+```bash Non-interactive batch
+npm run register -- --count 5 --non-interactive
+```
+
+```bash Disable fingerprint spoofing
+npm run register -- --count 1 --no-fingerprint
+```
+
+```bash Custom output paths
+npm run register -- --count 3 --non-interactive \
+  --output out/accounts.json \
+  --templateOutput out/template.json
+```
+
+```bash Different AWS region
+npm run register -- --count 2 --region eu-west-1 --non-interactive
+```
+
+</CodeGroup>
+
+## Output files
+
+### `show/results.json`
+
+Written after every run. Contains one record per attempted registration, including failures.
+
+```typescript
+{
+  email?: string        // registered email address
+  password?: string     // generated password
+  name?: string         // display name used during signup
+  refreshToken?: string // OAuth refresh token (present on success when template generation is on)
+  clientId?: string     // OAuth client ID
+  clientSecret?: string // OAuth client secret
+  success: boolean      // whether this attempt succeeded
+  error?: string        // error message if success is false
+}
+```
+
+The file holds an array of these objects, one per account slot. Failed entries have `success: false` and an `error` string; successful entries have all credential fields populated.
+
+### `show/builderid-template.json`
+
+Written after a run when `--emit-builderid-template` is active and at least one account succeeded. Contains only the entries that have a valid `refreshToken`, stripped down to the fields needed by `npm run switch`:
+
+```json
+[
+  {
+    "email": "user@example.com",
+    "password": "generated-password",
+    "refreshToken": "aor1...",
+    "clientId": "...",
+    "clientSecret": "..."
+  }
+]
+```
+
+Pass the path to this file to `npm run switch -- --template <path>` to start rotating accounts.
+
+<Note>Both output directories (`show/` by default) are created automatically if they do not exist.</Note>

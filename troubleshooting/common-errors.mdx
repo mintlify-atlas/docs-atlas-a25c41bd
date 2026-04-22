@@ -1,0 +1,240 @@
+---
+title: "Troubleshoot kiro-auto registration and switching errors"
+description: "Diagnose and fix the most common kiro-auto errors: registration failures, account switching issues, Kiro not found, and Playwright browser problems."
+---
+
+This page covers the errors most frequently encountered when running `npm run register` or `npm run switch`. Each section describes the symptom, the underlying cause, and the steps to resolve it.
+
+<AccordionGroup>
+
+  <Accordion title="Registration fails immediately">
+    **Cause:** kiro-auto cannot reach the AWS OIDC endpoint at startup. The first step of registration calls `https://oidc.us-east-1.amazonaws.com` to request a device code. If that request fails, the entire task is aborted before the browser even opens.
+
+    **Fix:**
+
+    1. Verify general network connectivity to the OIDC endpoint:
+
+    ```bash
+    curl -I https://oidc.us-east-1.amazonaws.com
+    ```
+
+    2. If the endpoint is blocked, route traffic through a proxy:
+
+    ```bash
+    npm run register -- --count 1 --proxyUrl "http://127.0.0.1:7890"
+    ```
+
+    3. If the `us-east-1` region is consistently unreachable from your location, try a closer region:
+
+    ```bash
+    npm run register -- --count 1 --region ap-northeast-1
+    ```
+
+    <Note>
+      The `--proxyUrl` flag configures both the Playwright browser and the Node.js `fetch` calls that contact AWS OIDC, so all traffic flows through the same proxy.
+    </Note>
+  </Accordion>
+
+  <Accordion title="Temporary email service unavailable">
+    **Cause:** kiro-auto cycles through six temporary email providers. If all of them fail—typically due to rate limiting or temporary outages—the registration task cannot obtain an inbox and will abort.
+
+    **Fix:**
+
+    1. Wait a few minutes and try again. Free temporary email providers impose per-IP rate limits that reset quickly.
+
+    2. For a more reliable experience, obtain an API key from the 215.im (YYDS Mail) service and set it before running:
+
+    ```bash
+    export YYDS_MAIL_API_KEY=your_key
+    npm run register -- --count 1
+    ```
+
+    The tool falls back to free providers automatically when `YYDS_MAIL_API_KEY` is not set, so setting the key only upgrades reliability—it does not break anything if the key is later removed.
+
+    <Tip>
+      215.im is the most reliable of the supported providers. If you register accounts regularly, getting a key for this service significantly reduces failures caused by temporary email unavailability.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="Verification code never arrives">
+    **Cause:** AWS may block temporary email domains that have been used too frequently, or the email provider's delivery pipeline may be slow under load. In both cases the automated browser times out waiting for the verification code.
+
+    **Fix:**
+
+    - Use a proxy to change your outbound IP address, which can help avoid IP-based email domain filtering:
+
+    ```bash
+    npm run register -- --count 1 --proxyUrl "http://127.0.0.1:7890"
+    ```
+
+    - Add a delay between tasks so that each registration uses a fresh inbox with less history:
+
+    ```bash
+    npm run register -- --count 5 --delayMs 5000
+    ```
+
+    - If you are running multiple concurrent registrations, reduce `--concurrency` to 1 to avoid hitting the same email provider simultaneously.
+  </Accordion>
+
+  <Accordion title="Registration succeeded but refreshToken is missing">
+    **Cause:** After the browser completes the registration form, kiro-auto polls the AWS device authorization endpoint to exchange the device code for a refresh token. The device code expires after approximately 10 minutes. If polling times out—due to a slow network, high concurrency, or the machine going to sleep—the poll loop exits without a token, and the account entry in `show/builderid-template.json` is omitted.
+
+    **Fix:**
+
+    1. Run the registration again. Each run issues a fresh device code with a new 10-minute window.
+
+    2. Avoid running more than 2–3 concurrent registrations on slow networks. Each browser instance must complete its full flow before the code expires:
+
+    ```bash
+    npm run register -- --count 5 --concurrency 2
+    ```
+
+    3. Check `show/results.json` for entries where `success` is `true` but `refreshToken` is absent—these are the accounts affected by the timeout.
+  </Accordion>
+
+  <Accordion title='Account switch: "Template file not found"'>
+    **Error message:**
+    ```
+    模板文件呢？被你吃了吗？ show/builderid-template.json
+    ```
+
+    **Cause:** The switch command reads `show/builderid-template.json` to find registered accounts. This file does not exist if no accounts have been registered yet, or if the command is being run from a different working directory than the project root.
+
+    **Fix:**
+
+    1. Register at least one account first:
+
+    ```bash
+    npm run register -- --count 1
+    ```
+
+    2. If the file exists at a custom location, pass its path explicitly:
+
+    ```bash
+    npm run switch -- --template /path/to/your/builderid-template.json
+    ```
+
+    3. Confirm you are running commands from the project root directory where `package.json` is located.
+  </Accordion>
+
+  <Accordion title='Account switch: "refreshToken invalid"'>
+    **Cause:** Each entry in `show/builderid-template.json` must have a `refreshToken` value that starts with `"aor"`. If a registration was interrupted mid-way, the entry may have been written with a missing or malformed token. The switch command validates this prefix and refuses to proceed with a bad token.
+
+    **Fix:**
+
+    1. Open `show/results.json` and look for entries where `success` is `true` and `refreshToken` begins with `"aor"`. Only those entries are valid for switching.
+
+    2. Re-register to replace the bad entries:
+
+    ```bash
+    npm run register -- --count 3
+    ```
+
+    3. If you edited `show/builderid-template.json` manually, verify the JSON structure is valid and that each object contains a `refreshToken`, `clientId`, and `clientSecret` field.
+
+    <Warning>
+      Do not modify `refreshToken` values by hand. Even a single changed character invalidates the token and will cause authentication to fail silently inside Kiro.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Kiro not restarting after switch">
+    **Cause:** When the switch command attempts to restart Kiro, it searches for the executable in a fixed list of default paths. If Kiro is installed in a non-standard location, none of the paths match and the restart step is skipped silently.
+
+    **Default paths checked on Windows:**
+
+    | Path |
+    |------|
+    | `%LOCALAPPDATA%\Programs\Kiro\Kiro.exe` |
+    | `%LOCALAPPDATA%\Kiro\Kiro.exe` |
+    | `C:\Program Files\Kiro\Kiro.exe` |
+    | `C:\Program Files (x86)\Kiro\Kiro.exe` |
+
+    On macOS, the tool checks `/Applications/Kiro.app/Contents/MacOS/Kiro` and `~/Applications/Kiro.app/Contents/MacOS/Kiro`. On Linux, it uses `which kiro`.
+
+    **Fix:**
+
+    If Kiro is installed outside the default paths, start it manually after running the switch command. The token files are written correctly regardless of whether Kiro is found—Kiro will read the new credentials the next time it starts.
+  </Accordion>
+
+  <Accordion title='Machine ID reset: "Access is denied"'>
+    **Cause:** Resetting the Windows Machine GUID requires writing to `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography` in the registry. Standard user accounts do not have write access to this key. Running the command in a normal terminal will produce an `Access is denied` error.
+
+    **Fix:**
+
+    1. Close your current terminal.
+    2. Right-click PowerShell or Command Prompt and select **Run as administrator**.
+    3. Navigate to the kiro-auto project directory and run:
+
+    ```powershell
+    npm run switch
+    ```
+
+    4. Select option **[8]** (reset machine ID only) or option **[3]** (switch account + restart + reset machine ID).
+
+    <Warning>
+      Machine ID reset is Windows-only. Running it on macOS or Linux prints a warning and exits without making changes.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Chinese characters display as garbled text (Windows)">
+    **Cause:** Windows terminals default to a code page (such as CP936 for Simplified Chinese systems or CP437 for English systems) that cannot render UTF-8 encoded characters correctly. The kiro-auto scripts attempt to set UTF-8 automatically via `chcp 65001`, but some terminal emulators ignore this command.
+
+    **Fix:**
+
+    Run the following command before starting any kiro-auto command:
+
+    ```powershell
+    chcp 65001
+    ```
+
+    Then run your kiro-auto command normally:
+
+    ```bash
+    npm run register
+    ```
+
+    If garbled text persists, switch to Windows Terminal, which uses UTF-8 by default.
+  </Accordion>
+
+  <Accordion title="Playwright browser not found">
+    **Error message:**
+    ```
+    Chromium executable not found
+    ```
+
+    **Cause:** The `npm install` step does not download the Playwright browser binaries automatically. A separate installation step is required. If this step was skipped or failed, the browser is absent and registration cannot start.
+
+    **Fix:**
+
+    1. Run the browser installer (downloads approximately 300 MB of Chromium):
+
+    ```bash
+    npm run install-browser
+    ```
+
+    2. If the download is blocked by a firewall or is too slow, set the Playwright mirror before installing:
+
+    ```bash
+    # Windows (Command Prompt)
+    set PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
+    npm run install-browser
+    ```
+
+    ```bash
+    # macOS / Linux
+    export PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
+    npm run install-browser
+    ```
+
+    3. Alternatively, install Chromium directly with the Playwright CLI:
+
+    ```bash
+    npx playwright install chromium
+    ```
+
+    <Note>
+      The downloaded browser is stored in a Playwright-managed cache directory and is not bundled with the project. Re-running `npm run install-browser` is safe if the previous download was incomplete.
+    </Note>
+  </Accordion>
+
+</AccordionGroup>

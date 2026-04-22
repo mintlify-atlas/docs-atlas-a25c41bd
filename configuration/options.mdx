@@ -1,0 +1,108 @@
+---
+title: "CLI options reference for register and switch commands"
+description: "Complete flag reference for kiro-auto register and switch commands: defaults, types, accepted values, and the output directory structure."
+---
+
+kiro-auto is configured entirely through CLI flags — there is no config file to manage. Every option has a sensible default so you can run the tool with no arguments at all, then override only what you need. The sections below document every flag for each command along with its type, default value, and accepted inputs.
+
+## register command
+
+Run account registration with `npm run register -- [flags]` or launch the interactive menu by running `npm run register` with no arguments.
+
+### Options
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--count` | `-n` | integer | `1` | Number of accounts to register |
+| `--concurrency` | `-c` | integer | `1` | Number of registrations to run in parallel |
+| `--delayMs` / `--delay` | `-d` | integer (ms) | `0` | Delay between each registration task in milliseconds |
+| `--proxyUrl` / `--proxy` | — | string (URL) | `undefined` | HTTP or HTTPS proxy URL — see [proxy configuration](/configuration/proxy) |
+| `--incognito` / `--no-incognito` | — | boolean | `true` | Launch browser in incognito mode |
+| `--fingerprint` / `--no-fingerprint` | — | boolean | `true` | Enable browser fingerprint spoofing — see [fingerprint spoofing](/configuration/fingerprint) |
+| `--output` | — | string (path) | `show/results.json` | Path where registration results are written |
+| `--region` | — | string | `us-east-1` | AWS region for the Builder ID device login flow |
+| `--emit-builderid-template` | — | boolean | `true` | Write a Builder ID template file after registration |
+| `--templateOutput` | — | string (path) | `show/builderid-template.json` | Path where the Builder ID template is written |
+| `--non-interactive` / `-y` | — | flag | — | Skip the interactive menu and run immediately with provided flags |
+
+<Note>
+When you pass at least one flag **and** `--non-interactive`, kiro-auto runs in headless batch mode and exits with code `1` if any registrations fail. Without `--non-interactive`, it opens the interactive menu with your flags applied as initial values.
+</Note>
+
+### Default options (from source)
+
+```typescript
+const DEFAULT_OPTIONS = {
+  count: 1,
+  concurrency: 1,
+  delayMs: 0,
+  proxyUrl: undefined,
+  incognitoMode: true,
+  useFingerprint: true,
+  outputPath: 'show/results.json',
+  region: 'us-east-1',
+  emitBuilderIdTemplate: true,
+  templateOutputPath: 'show/builderid-template.json'
+}
+```
+
+### Interactive menu options
+
+Running `npm run register` without `--non-interactive` opens a menu where you can adjust all of the above before starting. Menu option **[8]** lets you set or clear the proxy URL during the session.
+
+---
+
+## switch command
+
+Run account switching with `npm run switch -- [flags]` or open the interactive menu by running `npm run switch` with no arguments (or with `--interactive` / `-i`).
+
+### Options
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--template` | — | string (path) | `show/builderid-template.json` | Path to the Builder ID template produced by `register` |
+| `--region` | — | string | `us-east-1` | AWS region used when writing SSO cache files |
+| `--startUrl` | — | string (URL) | `https://view.awsapps.com/start` | AWS SSO start URL embedded in the SSO cache |
+| `--state` | — | string (path) | `show/switch-state.json` | Path where round-robin selection state is persisted |
+| `--dry-run` | — | flag | `false` | Preview which account would be activated without writing any files |
+| `--index` | — | integer | — | Force selection of a specific account by its zero-based index |
+| `--restart` / `-r` | — | flag | `false` | Automatically restart Kiro after switching |
+| `--reset-machine-id` / `-m` | — | flag | `false` | Reset the Windows MachineGuid registry value after switching (Windows only) |
+| `--interactive` / `-i` | — | flag | auto | Open the interactive menu; active by default when no flags are passed |
+
+### Round-robin account selection
+
+When you switch accounts without `--index`, the tool reads `show/switch-state.json` to determine which account is next in the rotation:
+
+```json
+{ "nextIndex": 2 }
+```
+
+After activating account at index `2`, the state file is updated to `{ "nextIndex": 3 }`. When the last account is reached, the counter wraps back to `0`. This ensures every registered account gets equal use across repeated switch calls.
+
+<Tip>
+Pass `--dry-run` to see which account would be selected next without actually writing SSO credentials. Useful for scripting or verifying state.
+</Tip>
+
+---
+
+## Output directory structure
+
+Both commands write their output into the `show/` directory by default. The directory is created automatically if it does not exist.
+
+```
+show/
+├── results.json              # Full registration results (all attempts)
+├── builderid-template.json   # Successful accounts ready for switching
+└── switch-state.json         # Round-robin position for the switch command
+```
+
+| File | Written by | Purpose |
+|------|-----------|---------|
+| `show/results.json` | `register` | Complete log of every registration attempt, including failures |
+| `show/builderid-template.json` | `register` | Subset of successful accounts with refresh tokens for switching |
+| `show/switch-state.json` | `switch` | Persists the next account index for round-robin rotation |
+
+<Warning>
+The `show/builderid-template.json` file contains sensitive credential data (refresh tokens, client secrets). Do not commit this file to version control.
+</Warning>

@@ -1,80 +1,220 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Quickstart: register an account and switch Kiro IDE"
+description: "Walk through registering an AWS Builder ID with kiro-auto's automated browser workflow, then apply it to Kiro IDE with a single menu selection."
 ---
 
-## Get started in three steps
-
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide walks you through the complete workflow: registering a fresh AWS Builder ID account with kiro-auto's automated browser registration, then applying it to Kiro IDE with a single menu selection. The whole process takes five to ten minutes, most of which is waiting for the Chromium browser to complete the registration form automatically.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  Complete [installation](/installation) before following this guide. You need Node.js >= 18, npm >= 9, and the Chromium browser downloaded via `npm run install-browser`.
 </Note>
+
+## Register your first account
+
+<Steps>
+
+  <Step title="Launch the registration menu">
+    Start the interactive registration tool:
+
+    ```bash
+    npm run register
+    ```
+
+    The banner and menu appear immediately:
+
+    ```text
+    ╔══════════════════════════════════════════════╗
+    ║  🤖 AWS 账号批量生产机 v1.0                  ║
+    ║     (白嫖 AWS，人人有责)                     ║
+    ╚══════════════════════════════════════════════╝
+
+    ┌─ ⚙️ 当前配置 ───────────────────────────────
+    │ 要造几个: 1 个
+    │ 同时开几个: 1 个
+    │ 每个隔多久: 0ms
+    │ 隐身模式: ✅ 开着呢
+    │ 指纹伪装: ✅ 伪装中
+    │ 生成模板: ✅ 会生成
+    │ 走代理: 无 (直连，AWS 知道你是谁)
+    └─────────────────────────────────────────────
+
+    ┌─ 🎮 操作菜单 ───────────────────────────────
+    │  [1] 🚀 开始造号！
+    │  [2] 改一下要造几个
+    │  [3] 改一下并发数 (别太贪心)
+    │  [4] 改一下间隔时间
+    │  [5] 切换隐身模式
+    │  [6] 切换指纹伪装
+    │  [7] 切换是否生成模板
+    │  [8] 设置代理 (不想被追踪就设一个)
+    │  [9] 看看历史战绩
+    │  [0] 退出 (不玩了)
+    └─────────────────────────────────────────────
+    ```
+
+    The default configuration registers one account with incognito mode and browser fingerprint spoofing enabled. For a first run, the defaults are fine.
+
+    Type `1` and press Enter to start registration.
+  </Step>
+
+  <Step title="Wait for automated registration to complete">
+    kiro-auto requests a device code from AWS, launches a headless Chromium browser, obtains a disposable email inbox, fills in the registration form, retrieves the verification code from the inbox, sets a password, and polls for the OAuth refresh token. You will see live progress in the terminal:
+
+    ```text
+    🔥 奥里给！准备造 1 个账号！并发 1 个！
+       (AWS: 你们礼貌吗？？？)
+
+    [干就完了！] 第1号选手: 正在向 AWS 伸手要设备码...
+    [冲冲冲！] 第1号选手: 拿到 userCode: ABCD-EFGH，浏览器启动！自动化走起！
+    [奥里给！] 第1号选手: 等 AWS 确认中...（它可能懵了）
+    [干就完事了！] 第1号选手: ✅ 拿下！邮箱: user_abc123@tempmail.com！AWS 又损失一员大将！
+
+    🎉 奥里给！1 个账号全部拿下！耗时 47 秒！
+       AWS: "我太难了..."
+
+    📁 结果文件已保存: /path/to/kiro-auto/show/results.json
+    📁 模板文件已保存: /path/to/kiro-auto/show/builderid-template.json
+       (拿去切换工具用，别浪费了！)
+    ```
+
+    The bracketed phrases like `[干就完了！]` ("just do it!") and `[冲冲冲！]` ("charge!") are motivational messages randomly selected by the tool for each task log line — they are cosmetic and carry no status meaning.
+
+    When you see `🎉 奥里给！... 全部拿下！`, registration succeeded.
+
+    <Warning>
+      If registration fails, the most common causes are network connectivity to AWS endpoints and temporary email providers being rate-limited. Try increasing the delay (`[4]` in the menu) or setting a proxy (`[8]`). See [Troubleshooting](/troubleshooting/common-errors) for more.
+    </Warning>
+  </Step>
+
+  <Step title="Inspect the output files">
+    kiro-auto writes two files to `show/` after a successful registration:
+
+    **`show/results.json`** — The full registration record for every account attempted in the session:
+
+    ```json
+    [
+      {
+        "email": "user_abc123@tempmail.com",
+        "password": "generated-password-here",
+        "name": "Jane Smith",
+        "refreshToken": "aor1_AbCdEfGh...",
+        "clientId": "...",
+        "clientSecret": "...",
+        "success": true
+      }
+    ]
+    ```
+
+    **`show/builderid-template.json`** — A condensed list of successful accounts formatted for `npm run switch`. Only accounts with a valid `refreshToken` appear here:
+
+    ```json
+    [
+      {
+        "email": "user_abc123@tempmail.com",
+        "password": "generated-password-here",
+        "refreshToken": "aor1_AbCdEfGh...",
+        "clientId": "...",
+        "clientSecret": "..."
+      }
+    ]
+    ```
+
+    The switch tool reads `show/builderid-template.json` and cycles through accounts round-robin on each run.
+  </Step>
+
+</Steps>
+
+## Switch the account into Kiro IDE
+
+<Steps>
+
+  <Step title="Launch the account switcher">
+    Open a terminal in the `kiro-auto` directory and run:
+
+    ```bash
+    npm run switch
+    ```
+
+    The switcher reads `show/builderid-template.json` and shows the current account inventory in the status bar:
+
+    ```text
+    ╔══════════════════════════════════════════════╗
+    ║   🎭 Kiro 账号切换大师 v1.0 - 专业换号工具  ║
+    ║        (白嫖 AWS，从我做起)                  ║
+    ╚══════════════════════════════════════════════╝
+
+    ┌─ 📊 当前状态 ───────────────────────────────
+    │ 账号库存: 1 个  |  下一个出场: 第 1 个
+    │ Kiro 状态: 正在打工 (PID: 12345)
+    │ 机器码: a1b2c3d4... (太长了不看了)
+    └─────────────────────────────────────────────
+
+    ┌─ 🎮 操作菜单 ───────────────────────────────
+    │  [1] 换个账号 (手动重启党专用)
+    │  [2] 换号 + 重启 Kiro (懒人首选)
+    │  [3] 换号 + 重启 + 换机器码 (全套服务)
+    │  [4] 看看详细状态 (闲得慌)
+    │  [5] 送走 Kiro 进程 (让它休息会)
+    │  [6] 召唤 Kiro (把它叫回来)
+    │  [7] 重启 Kiro (不换号)
+    │  [8] 换个机器码 (假装是新电脑)
+    │  [0] 退出 (不玩了)
+    └─────────────────────────────────────────────
+    ```
+  </Step>
+
+  <Step title="Apply the new account and restart Kiro">
+    Type `2` and press Enter to switch accounts and automatically restart Kiro IDE:
+
+    ```text
+    >>> 开始切换账号 <<<
+    模板位置: C:\...\show\builderid-template.json
+    第 1 个账号 / 共 1 个
+    邮箱: user_abc123@tempmail.com
+    ✓ 搞定！下次轮到第 1 个账号
+
+    正在重启 Kiro (给它来个复活甲)...
+    正在送走 Kiro 进程 (PID: 12345)，一路走好...
+    ✓ Kiro 已经安详地离去了
+    正在召唤 Kiro: C:\Users\...\AppData\Local\Programs\Kiro\Kiro.exe
+    ✓ Kiro 已被召唤，请稍等它慢慢启动
+    ```
+
+    The switcher writes the account's `refreshToken` and client credentials into `~/.aws/sso/cache/`, then kills and relaunches Kiro. When Kiro starts, it reads those credential files and signs in as the new account automatically.
+
+    <Tip>
+      Use option **[3]** ("全套服务" — full service) to also rotate the Windows machine ID at the same time. This changes the `MachineGuid` registry key so AWS treats the system as a new device. Option [3] requires an administrator terminal on Windows.
+    </Tip>
+  </Step>
+
+</Steps>
+
+## Skip the interactive menu
+
+If you want to register accounts without the menu — for example in a script — pass `--non-interactive` along with your options:
+
+```bash
+# Register 1 account non-interactively
+npm run register -- --count 1 --non-interactive
+
+# Register 5 accounts with 2 concurrent browsers and a 2-second delay between tasks
+npm run register -- --count 5 --concurrency 2 --delayMs 2000 --non-interactive
+
+# Register with a proxy
+npm run register -- --count 1 --proxyUrl "http://127.0.0.1:7890" --non-interactive
+```
+
+The tool exits with code `0` if all registrations succeeded and `1` if any failed.
+
+## What happens next
+
+kiro-auto tracks which account to use next in `show/switch-state.json`. Each time you run `npm run switch` and select an option that switches accounts, the index advances by one and wraps back to the first account when the end of the list is reached. You can register more accounts at any time by re-running `npm run register` — new entries are appended to `show/builderid-template.json`.
+
+<CardGroup cols={2}>
+  <Card title="register command reference" icon="user-plus" href="/commands/register">
+    All flags, concurrency options, proxy settings, and non-interactive mode details.
+  </Card>
+  <Card title="switch command reference" icon="arrow-right-arrow-left" href="/commands/switch">
+    Account switching, machine ID rotation, and Kiro process management.
+  </Card>
+</CardGroup>

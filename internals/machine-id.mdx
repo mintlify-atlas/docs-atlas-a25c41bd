@@ -1,0 +1,92 @@
+---
+title: "How kiro-auto resets the Windows MachineGuid registry key"
+description: "kiro-auto overwrites MachineGuid under HKLM\\SOFTWARE\\Microsoft\\Cryptography with a new random UUID so the machine appears as a new device to AWS."
+---
+
+AWS and Kiro IDE may use hardware identifiers to associate usage with a specific machine. On Windows, a primary identifier is the `MachineGuid` registry value under `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography`. kiro-auto can overwrite this value with a freshly generated UUID, making the system appear as a new device on the next Kiro startup.
+
+<Warning>
+Modifying `MachineGuid` affects any other software that uses it for licensing, telemetry, or device identification — not just Kiro. Proceed only if you understand the implications for all installed software on the machine.
+</Warning>
+
+## Registry key location
+
+```
+HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography
+Value name: MachineGuid
+Value type:  REG_SZ
+```
+
+## Reading the current machine ID
+
+`getWindowsMachineId()` in `scripts/switch.ts` runs:
+
+```cmd
+reg query "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography" /v MachineGuid
+```
+
+The output is parsed with the regex `/MachineGuid\s+REG_SZ\s+([a-f0-9-]+)/i`. The matched value is returned as a lowercase string, or `null` if the command fails.
+
+## Generating a new machine ID
+
+`generateRandomMachineId()` calls Node.js's built-in:
+
+```typescript
+crypto.randomUUID().toLowerCase()
+```
+
+This produces a random lowercase UUID v4 (e.g. `3f2504e0-4f89-11d3-9a0c-0305e82c3301`).
+
+## Writing the new machine ID
+
+`setWindowsMachineId(newMachineId)` runs:
+
+```cmd
+reg add "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography" /v MachineGuid /t REG_SZ /d "<newId>" /f
+```
+
+The `/f` flag forces the write without a confirmation prompt. If the command fails with `Access is denied` or `拒绝访问`, the function returns `{ success: false, error: '...' }`. All other errors are also surfaced as a failure result rather than thrown exceptions.
+
+## Triggering the reset
+
+The machine ID reset can be triggered in several ways:
+
+| Method | Detail |
+|---|---|
+| CLI flag `--reset-machine-id` | Non-interactive mode; runs reset then switches account |
+| CLI flag `-m` | Short alias for `--reset-machine-id` |
+| Interactive menu option `[3]` | Switch account + reset machine ID + restart Kiro |
+| Interactive menu option `[8]` | Reset machine ID only, no account switch |
+
+In non-interactive mode the reset runs after account switching and before Kiro is restarted (when `--restart` is also set).
+
+## Platform support
+
+`resetMachineId()` checks the current platform before doing anything:
+
+```typescript
+async function resetMachineId(): Promise<boolean> {
+  const osType = getOSType()
+  if (osType !== 'windows') {
+    log('yellow', '兄弟，机器码重置只支持 Windows，别为难我了')
+    return false
+  }
+  // ...
+}
+```
+
+On macOS and Linux the function prints a warning and returns `false` without making any changes. The calling code in non-interactive mode treats a `false` return as a non-fatal warning and continues to restart Kiro if `--restart` was also requested.
+
+## Administrator privileges
+
+Writing to `HKEY_LOCAL_MACHINE` requires administrator (elevated) privileges. If the process is not elevated, the `reg add` command will fail with `Access is denied`. In that case `setWindowsMachineId()` returns:
+
+```typescript
+{ success: false, error: 'Access is denied' }
+```
+
+Run the script from an elevated Command Prompt or PowerShell session (`Run as administrator`) to use this feature.
+
+<Note>
+The machine ID reset only needs to be done once per session. Switching accounts multiple times without resetting the machine ID is supported and does not require elevation.
+</Note>

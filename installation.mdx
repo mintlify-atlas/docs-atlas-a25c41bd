@@ -1,0 +1,130 @@
+---
+title: "Install kiro-auto: Node.js setup and Chromium download"
+description: "Install kiro-auto's Node.js dependencies and download the Chromium browser used for automated AWS Builder ID account registration."
+---
+
+kiro-auto runs entirely from the cloned repository — there is no global package to install. You need Node.js, npm, and about 500 MB of disk space: roughly 200 MB for Node modules and 300 MB for the Chromium browser that Playwright downloads separately.
+
+<Steps>
+
+  <Step title="Check prerequisites">
+    Confirm that Node.js 18 or later and npm 9 or later are installed before continuing.
+
+    ```bash
+    node --version   # must be v18.0.0 or later
+    npm --version    # must be 9.x or later
+    ```
+
+    <Note>
+      kiro-auto uses ES module syntax (`"type": "module"` in `package.json`) and requires Node.js 18 at minimum. Earlier versions will fail at startup.
+    </Note>
+  </Step>
+
+  <Step title="Get the source code">
+    Clone the repository or extract the zip archive you received.
+
+    <CodeGroup>
+
+    ```bash git clone
+    git clone https://github.com/AERT-7Y/kiro-auto.git
+    cd kiro-auto
+    ```
+
+    ```bash zip archive (Windows)
+    # Extract to a folder of your choice, then open a terminal there:
+    cd C:\Users\<your-username>\Desktop\kiro-auto
+    ```
+
+    </CodeGroup>
+  </Step>
+
+  <Step title="Install Node.js dependencies">
+    Run `npm install` from the project root. This installs Playwright, playwright-extra, the stealth plugin, undici, tsx, and TypeScript.
+
+    ```bash
+    npm install
+    ```
+
+    You should see a `node_modules/` directory appear. The install takes about 30–60 seconds on a typical connection.
+
+    <Tip>
+      If you prefer pnpm, run `pnpm install` instead. All scripts in `package.json` work the same way with either package manager.
+    </Tip>
+  </Step>
+
+  <Step title="Download Chromium">
+    kiro-auto drives the AWS registration form using Playwright's bundled Chromium build. Download it with the dedicated npm script:
+
+    ```bash
+    npm run install-browser
+    ```
+
+    This runs `npx playwright install chromium` under the hood and downloads approximately 300 MB. The browser is stored in Playwright's local cache and is not added to `node_modules/`.
+
+    <Warning>
+      If you are behind a slow connection or a corporate proxy, the download may time out. Set the `PLAYWRIGHT_DOWNLOAD_HOST` environment variable to use an npm mirror:
+
+      ```bash
+      set PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
+      npx playwright install chromium
+      ```
+    </Warning>
+  </Step>
+
+  <Step title="Verify the installation">
+    Confirm everything is working by launching the account switcher's interactive menu:
+
+    ```bash
+    npm run switch
+    ```
+
+    If the installation succeeded, you will see the menu banner:
+
+    ```text
+    ╔══════════════════════════════════════════════╗
+    ║   🎭 Kiro 账号切换大师 v1.0 - 专业换号工具  ║
+    ║        (白嫖 AWS，从我做起)                  ║
+    ╚══════════════════════════════════════════════╝
+
+    ┌─ 🎮 操作菜单 ───────────────────────────────
+    │  [1] 换个账号 (手动重启党专用)
+    │  [2] 换号 + 重启 Kiro (懒人首选)
+    ...
+    └─────────────────────────────────────────────
+    ```
+
+    Enter `0` to exit. If you see this menu, the installation is complete.
+  </Step>
+
+</Steps>
+
+## Windows: fix garbled terminal output
+
+kiro-auto's CLI output uses UTF-8 characters including CJK text and emoji. On Windows, the default terminal code page is not UTF-8, which causes those characters to render as mojibake (`颹滑`-style garbage).
+
+Switch to UTF-8 before running any command:
+
+```bat
+chcp 65001
+```
+
+You only need to run this once per terminal session. Both `scripts/register.ts` and `scripts/switch.ts` attempt this automatically at startup, but running it manually first is more reliable in older shells.
+
+## Available npm scripts
+
+| Script | Command | Description |
+|---|---|---|
+| `npm run switch` | `tsx scripts/switch.ts` | Launch the account switcher interactive menu |
+| `npm run register` | `tsx scripts/register.ts` | Launch the account registration interactive menu |
+| `npm run install-browser` | `npx playwright install chromium` | Download the Chromium browser for Playwright |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Register your first account" icon="user-plus" href="/quickstart">
+    Walk through registering an AWS Builder ID and switching it into Kiro IDE.
+  </Card>
+  <Card title="register command reference" icon="terminal" href="/commands/register">
+    All CLI flags, concurrency options, proxy settings, and output formats.
+  </Card>
+</CardGroup>

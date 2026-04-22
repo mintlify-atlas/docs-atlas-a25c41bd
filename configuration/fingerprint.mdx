@@ -1,0 +1,145 @@
+---
+title: "Browser fingerprint spoofing for AWS registration evasion"
+description: "kiro-auto randomizes Canvas, WebGL, Navigator, Screen, and Timezone browser properties to reduce bot detection during AWS account registration."
+---
+
+Modern bot-detection systems identify automated browsers not just by IP address but by the consistency of browser properties — screen resolution, GPU vendor, font list, canvas rendering output, and dozens of other signals. kiro-auto's fingerprint engine randomizes these properties for each registration task, making concurrent browser sessions appear as distinct physical machines.
+
+## Enabling and disabling
+
+Fingerprint spoofing is **enabled by default**. To disable it, pass `--no-fingerprint`:
+
+```bash
+npm run register -- --count 3 --no-fingerprint
+```
+
+In the interactive menu, option **[6]** toggles fingerprint spoofing on or off for the current session.
+
+<Note>
+Fingerprint spoofing is designed to work alongside incognito mode (`--incognito`, enabled by default). Incognito mode prevents cookies and storage from persisting between sessions, while fingerprint spoofing ensures each incognito session presents a distinct browser identity. Using both together provides the strongest isolation between registration tasks.
+</Note>
+
+## What is spoofed
+
+The `FingerprintGenerator` class in `lib/fingerprint/generator.ts` builds a complete `FingerprintProfile` for each task. The `FingerprintInjector` then compiles this profile into a JavaScript snippet injected into every page via Playwright's `addInitScript()` — which runs before any page JavaScript — so overrides are in place before the AWS registration flow begins.
+
+### Navigator
+
+The `navigator` object is overridden to hide automation signals and present a consistent browser identity:
+
+| Property | Spoofed value |
+|----------|--------------|
+| `userAgent` | Chrome 120–124 on Windows, macOS, or Linux |
+| `platform` | `Win32`, `MacIntel`, or `Linux x86_64` |
+| `language` | `en-US` |
+| `languages` | `["en-US", "en"]` |
+| `doNotTrack` | `null` |
+| `webdriver` | `false` (hides automation) |
+| `pdfViewerEnabled` | `true` |
+
+### Hardware
+
+The `HardwareFingerprint` profile sets values for hardware-related navigator properties:
+
+| Property | Spoofed value |
+|----------|--------------|
+| `hardwareConcurrency` | 4, 6, 8, 12, or 16 (random) |
+| `deviceMemory` | 4, 8, 16, or 32 GB (random) |
+| `maxTouchPoints` | `0` (desktop device, no touch) |
+
+### Screen
+
+`Screen.prototype` properties are replaced with values drawn from real device resolution pools:
+
+| Property | Windows examples | macOS examples | Linux examples |
+|----------|-----------------|---------------|---------------|
+| `width` × `height` | 1920×1080, 2560×1440, 1366×768, 1536×864, 3840×2160 | 2560×1600, 2880×1800, 2560×1440, 1920×1080, 3024×1964 | 1920×1080, 2560×1440, 1366×768, 1600×900 |
+| `colorDepth` / `pixelDepth` | 24 | 24 | 24 |
+| `devicePixelRatio` | 1, 1.25, 1.5, or 2 | 2, 2.5, or 3 (Retina) | 1, 1.25, 1.5, or 2 |
+
+`availHeight` accounts for the OS taskbar or menu bar (Windows: −40 px, macOS: −25 px).
+
+### WebGL
+
+`WebGLRenderingContext.prototype.getParameter` and its WebGL 2 counterpart are patched to return realistic GPU vendor/renderer strings:
+
+| OS | Example vendor | Example renderer |
+|----|---------------|-----------------|
+| Windows | `Google Inc. (NVIDIA)` | `ANGLE (NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0)` |
+| Windows | `Google Inc. (NVIDIA)` | `ANGLE (NVIDIA GeForce GTX 1660 Ti Direct3D11 vs_5_0 ps_5_0)` |
+| Windows | `Google Inc. (AMD)` | `ANGLE (AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0)` |
+| Windows | `Google Inc. (Intel)` | `ANGLE (Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)` |
+| macOS | `Apple Inc.` | `Apple M1` |
+| macOS | `Apple Inc.` | `Apple M2` |
+| macOS | `Apple Inc.` | `Apple M1 Pro` |
+| macOS | `Apple Inc.` | `AMD Radeon Pro 5500M` |
+| Linux | `NVIDIA Corporation` | `NVIDIA GeForce GTX 1060/PCIe/SSE2` |
+| Linux | `AMD` | `AMD Radeon RX 570 Series` |
+| Linux | `Intel Open Source Technology Center` | `Mesa DRI Intel(R) UHD Graphics 620` |
+
+### Canvas
+
+`HTMLCanvasElement.prototype.toDataURL` and `CanvasRenderingContext2D.prototype.getImageData` are wrapped to inject deterministic per-pixel noise driven by a seeded random number generator. Each fingerprint profile receives a unique 16-byte hex seed, so two concurrent sessions produce measurably different canvas outputs even when rendering identical content.
+
+### Audio
+
+`AudioContext.prototype.createOscillator` is wrapped to add a tiny seeded frequency offset (`±0.0005 Hz`) to each oscillator. This disrupts audio fingerprinting without affecting perceptible audio output.
+
+### Timezone
+
+`Date.prototype.getTimezoneOffset` and `Intl.DateTimeFormat` are overridden to report one of eleven real-world timezones:
+
+```
+America/New_York  America/Chicago  America/Denver  America/Los_Angeles
+Europe/London     Europe/Paris     Europe/Berlin
+Asia/Tokyo        Asia/Shanghai    Asia/Singapore
+Australia/Sydney
+```
+
+### WebRTC
+
+WebRTC is disabled entirely (`RTCPeerConnection` is replaced with a function that throws) to prevent IP address leaks through STUN/TURN negotiation.
+
+### Media devices
+
+`navigator.mediaDevices.enumerateDevices` returns a randomized but realistic list of audio inputs (1–2), audio outputs (1–3), and video inputs (0–1) to prevent device enumeration fingerprinting.
+
+### Fonts
+
+Each profile receives the full OS-appropriate system font list. Windows profiles report Microsoft core fonts (Calibri, Segoe UI, etc.), macOS profiles report Apple fonts (Helvetica Neue, San Francisco, etc.), and Linux profiles report common open-source fonts (DejaVu, Liberation, Ubuntu).
+
+## Advanced injectors
+
+Two additional injectors run alongside the main script:
+
+- **`clientrects-injector.ts`** — wraps `Element.prototype.getBoundingClientRect` and `getClientRects` to add sub-pixel noise, disrupting layout-based fingerprinting.
+- **`font-injector.ts`** — patches canvas text measurement to add slight font-metric noise, making font fingerprinting less reliable.
+
+## OS distribution
+
+The generator selects an OS for each profile with weighted randomness that reflects real desktop market share:
+
+- **Windows** — 70 %
+- **macOS** — 20 %
+- **Linux** — 10 %
+
+All other properties (user agent, screen resolution, WebGL GPU, font list) are generated to be internally consistent with the selected OS.
+
+## Log output
+
+When fingerprint spoofing is active, you will see output like the following in the terminal for each registration task:
+
+```
+[指纹] 生成新指纹配置...
+[指纹] User Agent: Mozilla/5.0 ...
+[指纹] Platform: Win32
+[指纹] Screen: 1920x1080
+[指纹] Hardware: 8 cores, 8GB RAM
+[指纹] 注入高级指纹脚本...
+[指纹] ✓ 指纹脚本已注入
+```
+
+## Related options
+
+- [All register options](/configuration/options) — full flag reference including `--no-fingerprint` and `--no-incognito`
+- [Proxy configuration](/configuration/proxy) — route browser and API traffic through a proxy server

@@ -1,0 +1,158 @@
+---
+title: "kiro-auto FAQ: registration, switching, and platform support"
+description: "Frequently asked questions about kiro-auto covering account limits, concurrency, round-robin switching, output file formats, and macOS or Linux support."
+---
+
+This page answers the questions that come up most often when using kiro-auto for AWS Builder ID account registration and Kiro IDE account switching. Questions are grouped by topic.
+
+## Registration
+
+<AccordionGroup>
+
+  <Accordion title="How many accounts can I register at once?">
+    There is no hard limit enforced by the tool. The `--count` flag accepts any positive integer:
+
+    ```bash
+    npm run register -- --count 20
+    ```
+
+    In practice, setting `--concurrency` above 3–5 risks exhausting system memory because each Playwright browser instance uses approximately 200 MB of RAM. Registering more than 50 accounts in a single session is not recommended without a reliable proxy and meaningful delays between tasks:
+
+    ```bash
+    npm run register -- --count 50 --concurrency 2 --delayMs 3000 --proxyUrl "http://127.0.0.1:7890"
+    ```
+
+    The interactive menu also warns you when you set a count above 50.
+  </Accordion>
+
+  <Accordion title="What concurrency setting should I use?">
+    Start with `--concurrency 1` (the default). This is the safest setting and is sufficient for most use cases.
+
+    Increase to 2–3 only if you have a fast, stable network connection and enough free RAM (at least 400–600 MB per additional concurrent browser). Each browser instance is fully independent and uses its own randomized fingerprint profile, so running them simultaneously does not produce duplicate fingerprints.
+
+    ```bash
+    # Conservative: one at a time
+    npm run register -- --count 5 --concurrency 1
+
+    # Faster: two at a time, with a delay between tasks
+    npm run register -- --count 10 --concurrency 2 --delayMs 2000
+    ```
+
+    <Warning>
+      High concurrency (above 5) on a slow network increases the chance that device codes expire before token polling completes, resulting in accounts without a `refreshToken`.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="How long does registering one account take?">
+    Typically 60–180 seconds per account. The main variable is temporary email delivery speed: kiro-auto must wait for AWS to send a verification code to the inbox before the browser can proceed.
+
+    AWS OIDC response times also vary by region and time of day. Using `--region ap-northeast-1` (Tokyo) instead of the default `us-east-1` can reduce latency for users in Asia.
+  </Accordion>
+
+  <Accordion title="What is the 215.im (YYDS Mail) API key for?">
+    215.im is a premium temporary email service that is significantly more reliable than the free alternatives kiro-auto falls back to. Free providers are subject to rate limits, occasional downtime, and AWS domain blocks. A 215.im API key gives kiro-auto access to a higher-quality inbox that is less likely to fail mid-registration.
+
+    To use it, obtain an API key from the 215.im service and set the environment variable before running:
+
+    ```bash
+    export YYDS_MAIL_API_KEY=your_key
+    npm run register -- --count 5
+    ```
+
+    The tool automatically falls back to free services if the key is not set or if 215.im is unavailable, so setting the key is optional but recommended for large registration batches.
+  </Accordion>
+
+</AccordionGroup>
+
+## Account switching
+
+<AccordionGroup>
+
+  <Accordion title="Where are my registered accounts stored?">
+    kiro-auto writes account data to two files inside the `show/` directory:
+
+    | File | Contents |
+    |------|----------|
+    | `show/builderid-template.json` | Array of accounts with `refreshToken`, `clientId`, and `clientSecret`. This is the file the switch command reads. |
+    | `show/results.json` | Full registration results including failures, emails, and passwords. Useful for auditing. |
+    | `show/switch-state.json` | Tracks which account index will be selected next during round-robin switching. |
+
+    You can view a summary of registered accounts at any time by running `npm run register` and selecting **[9]** from the menu.
+  </Accordion>
+
+  <Accordion title="How does round-robin account selection work?">
+    The switch command reads `show/switch-state.json` to find the `nextIndex` value, selects `accounts[nextIndex]` from `show/builderid-template.json`, writes the token files, then saves `nextIndex + 1` back to the state file. When the index reaches the end of the array it wraps back to 0.
+
+    For example, with 3 accounts:
+
+    ```
+    Switch 1 → account[0], state becomes nextIndex: 1
+    Switch 2 → account[1], state becomes nextIndex: 2
+    Switch 3 → account[2], state becomes nextIndex: 0
+    Switch 4 → account[0], state becomes nextIndex: 1  ← wraps around
+    ```
+
+    To select a specific account by index instead of following round-robin order, use the `--index` flag:
+
+    ```bash
+    npm run switch -- --index 2
+    ```
+  </Accordion>
+
+  <Accordion title="What happens if I run switch when Kiro is not running?">
+    The token files are still written successfully to `~/.aws/sso/cache/`. A warning is printed indicating that Kiro is not currently running. No error is returned and the state file is updated normally.
+
+    When you start Kiro manually afterward, it will read the newly written credentials and log in with the switched account.
+  </Accordion>
+
+  <Accordion title="Is it safe to run --dry-run?">
+    Yes. With `--dry-run`, the switch command:
+
+    - Reads the template file and selects the next account (normal behavior)
+    - Prints what it would do
+    - **Does not** write any files to `~/.aws/sso/cache/`
+    - **Does not** update `show/switch-state.json`
+
+    This makes `--dry-run` useful for previewing which account would be selected next without actually performing the switch:
+
+    ```bash
+    npm run switch -- --dry-run
+    ```
+  </Accordion>
+
+  <Accordion title="Can I back up my accounts?">
+    Yes. Copy the entire `show/` directory to a safe location:
+
+    ```bash
+    cp -r show/ ~/backup/kiro-accounts-$(date +%Y%m%d)/
+    ```
+
+    The `show/builderid-template.json` file contains all the refresh tokens needed for future switching. As long as you have this file, you can restore your account pool on any machine by placing it back in the `show/` directory.
+
+    <Warning>
+      The `show/builderid-template.json` file contains sensitive credentials. Do not share it or commit it to a public repository.
+    </Warning>
+  </Accordion>
+
+</AccordionGroup>
+
+## Platform support
+
+<AccordionGroup>
+
+  <Accordion title="Can I use kiro-auto on macOS or Linux?">
+    Partial support is available on macOS and Linux:
+
+    | Feature | Windows | macOS | Linux |
+    |---------|---------|-------|-------|
+    | `npm run register` | Yes | Yes | Yes |
+    | `npm run switch` (token file writing) | Yes | Yes | Yes |
+    | Kiro process auto-restart | Yes | Yes (via `which kiro`) | Yes (via `which kiro` / `pgrep`) |
+    | Machine ID reset (`--reset-machine-id`) | Yes | No | No |
+
+    On macOS, kiro-auto looks for Kiro at `/Applications/Kiro.app/Contents/MacOS/Kiro` and `~/Applications/Kiro.app/Contents/MacOS/Kiro`. On Linux, it uses `which kiro` to find the executable.
+
+    Machine ID reset reads and writes `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography` in the Windows registry and has no equivalent implementation on other platforms. Attempting it on macOS or Linux prints a warning and exits without making any changes.
+  </Accordion>
+
+</AccordionGroup>

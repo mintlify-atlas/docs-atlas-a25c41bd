@@ -1,0 +1,147 @@
+---
+title: "Disposable email providers and verification code extraction"
+description: "kiro-auto tries six temporary email providers in priority order to obtain inboxes and extract the 6-digit AWS verification code during registration."
+---
+
+During Builder ID registration, kiro-auto needs a real inbox to receive the AWS 6-digit verification code. It integrates six disposable email providers and tries them in a fixed priority order, moving to the next provider if the current one fails after its maximum number of attempts. All provider logic lives in `createTempMail()` and `getTempMailCode()` in `lib/register.ts`.
+
+## Provider priority order
+
+<Steps>
+  <Step title="215.im (YYDS Mail)">
+    **Requires** the `YYDS_MAIL_API_KEY` or `MALIAPI_215_API_KEY` environment variable. If neither is set the provider is skipped immediately.
+
+    ```bash
+    # Set API key for 215.im service
+    export YYDS_MAIL_API_KEY=your_api_key_here
+    # or
+    export MALIAPI_215_API_KEY=your_api_key_here
+    ```
+
+    **Inbox creation** — POST to `https://maliapi.215.im/v1/accounts` with:
+
+    ```json
+    {
+      "address": "<random 8-char alphanumeric prefix>",
+      "domain": "0m0.abrdns.com"
+    }
+    ```
+
+    The API key is sent as the `X-API-Key` header. A successful response has the shape `{ success: true, data: { address, token } }`.
+
+    **Inbox polling** — GET `https://maliapi.215.im/v1/messages?address=<email>` with `Authorization: Bearer <token>`. Each message is then fetched individually at `https://maliapi.215.im/v1/messages/<id>` to retrieve its full body.
+
+    Maximum attempts: **10**
+  </Step>
+
+  <Step title="tempmail.lol">
+    No API key required.
+
+    **Inbox creation** — POST to `https://api.tempmail.lol/v2/inbox/create`. The response contains `{ address, token }`.
+
+    **Inbox polling** — GET `https://api.tempmail.lol/v2/inbox?token=<token>`. The response contains `{ emails: [{ from, subject, body, html }] }`.
+
+    Maximum attempts: **10**
+  </Step>
+
+  <Step title="mail.tm">
+    No API key required.
+
+    **Inbox creation** involves three steps:
+    1. GET `https://api.mail.tm/domains` to retrieve an available domain from `hydra:member[0].domain`
+    2. POST `https://api.mail.tm/accounts` with `{ address: "<random>@<domain>", password }` to create the account
+    3. POST `https://api.mail.tm/token` with the same credentials to get a JWT bearer token
+
+    **Inbox polling** — GET `https://api.mail.tm/messages` with `Authorization: Bearer <token>`.
+
+    Maximum attempts: **5**
+  </Step>
+
+  <Step title="1secmail.com">
+    No API key required.
+
+    **Inbox creation** — GET `https://www.1secmail.com/api/v1/?action=genRandomMailbox&count=1`. The response is a JSON array; the first element is the email address. The address itself is used as the token.
+
+    **Inbox polling** — GET `https://www.1secmail.com/api/v1/?action=getMessages&login=<user>&domain=<domain>`. Each message is then fetched via `?action=readMessage&login=<user>&domain=<domain>&id=<id>` to get `textBody` and `htmlBody`.
+
+    Maximum attempts: **5**
+  </Step>
+
+  <Step title="tempmail.plus">
+    No API key required.
+
+    **Inbox creation** — POST to `https://tempmail.plus/api/mails` (no body required). The response contains `{ email, token? }`. When `token` is absent, the email address is used as the token.
+
+    **Inbox polling** — GET `https://tempmail.plus/api/mails/<email>`. The response contains `{ mails: [{ from, subject, body, html }] }`.
+
+    Maximum attempts: **5**
+  </Step>
+
+  <Step title="guerrillamail.com">
+    No API key required.
+
+    **Inbox creation** — GET `https://api.guerrillamail.com/ajax.php?f=get_email_address`. The response contains `{ email_addr, sid_token }`.
+
+    **Inbox polling** — GET `https://api.guerrillamail.com/ajax.php?f=get_email_list&sid_token=<token>`. Each message is fetched via `?f=fetch_email&sid_token=<token>&email_id=<mail_id>` to get `mail_body`.
+
+    Maximum attempts: **3**
+  </Step>
+</Steps>
+
+## Fallback behavior
+
+`createTempMail()` iterates through the provider list. For each provider it runs up to its `maxAttempts` within a 30-second window. Between failed attempts there is a 500 ms pause. If a provider exhausts its attempts, the function logs the failure and moves on to the next entry. If all six providers fail, `createTempMail()` returns `null` and registration is aborted.
+
+## Verification code extraction
+
+`getTempMailCode()` polls the inbox of whichever provider was used every **3 seconds** for up to **120 seconds**. It determines the correct provider API to call by inspecting the email domain:
+
+| Domain pattern | Provider |
+|---|---|
+| Contains `abrdns` or `yyds.dev` | 215.im |
+| Contains `mail.tm` or ends with `.tm` | mail.tm |
+| Contains `1secmail`, `esiix`, `wwjmp`, or `icznn` | 1secmail.com |
+| Contains `tempmail.plus` or `tmpbox` | tempmail.plus |
+| Contains `guerrillamail`, `grr.la`, or `sharklasers` | guerrillamail.com |
+| Anything else | tempmail.lol |
+
+Messages are pre-filtered to known AWS sender addresses before extraction is attempted. The four extraction patterns are tried in order against the plain-text body (after HTML-stripping), raw HTML, and subject line:
+
+```typescript
+const CODE_PATTERNS = [
+  // "verification code: 123456" or "Your code is 123456"
+  /(?:verification\s*code|验证码|Your code is|code is)[：:\s]*(\d{6})/gi,
+
+  // "is 123456" or "为 123456"
+  /(?:is|为)[：:\s]*(\d{6})\b/gi,
+
+  // standalone 6-digit number on its own line
+  /^\s*(\d{6})\s*$/gm,
+
+  // HTML-embedded: >123456<
+  />\s*(\d{6})\s*</g,
+]
+```
+
+### False-positive filtering
+
+After a pattern matches, the surrounding 20 characters of context are inspected. Matches are discarded if any of the following are true:
+
+- The code is preceded by `#` (CSS hex color: `#a1b2c3`)
+- The context matches `color:\s*[^;]*\d{6}` (inline style color value)
+- The context contains `rgb`, `rgba`, or `hsl`
+- The context contains a 7-or-more-digit number sequence
+
+<Warning>
+If the AWS verification email is delivered to an inbox that the selected provider cannot read (e.g. the domain was banned by AWS), `getTempMailCode()` will time out after 120 seconds and registration will fail. In that case, run the registration again — a different domain may be allocated.
+</Warning>
+
+## HTML to plain text conversion
+
+Before running regex extraction, HTML email bodies are converted to plain text by `htmlToText()`. The function:
+
+1. Decodes HTML entities (`&nbsp;`, `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, numeric and hex character references)
+2. Strips `<style>` and `<script>` blocks entirely
+3. Converts `<br>`, `</p>`, and `</div>` to newlines
+4. Strips all remaining HTML tags
+5. Collapses whitespace sequences to single spaces

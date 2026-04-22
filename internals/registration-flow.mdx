@@ -1,0 +1,178 @@
+---
+title: "AWS Builder ID registration flow: OIDC to refresh token"
+description: "kiro-auto combines the AWS OIDC device authorization flow with Playwright browser automation to register Builder ID accounts using disposable email addresses."
+---
+
+kiro-auto automates the full AWS Builder ID account creation process by combining the AWS OIDC device authorization flow with headless Chromium browser automation. Each registration run requests a device code from AWS, acquires a disposable email inbox, navigates the signup form, retrieves the AWS verification code from that inbox, and polls for the final refresh token — all without any manual steps.
+
+## Type definitions
+
+The result of initiating device login is represented by `BuilderIdStartResult` in `lib/auth.ts`:
+
+```typescript
+type BuilderIdStartResult =
+  | {
+      success: true
+      userCode: string
+      verificationUri: string
+      expiresIn: number
+      interval: number
+      clientId: string
+      clientSecret: string
+      deviceCode: string
+      expiresAt: number
+    }
+  | { success: false; error: string }
+```
+
+The `verificationUri` field is set to `verificationUriComplete` when available (which includes the `user_code` as a query parameter), falling back to the bare `verificationUri`. `expiresAt` is computed as `Date.now() + expiresIn * 1000`.
+
+## Registration flow
+
+<Steps>
+  <Step title="Request device code from AWS OIDC">
+    `startBuilderIdDeviceLogin(region)` in `lib/auth.ts` makes two sequential HTTP calls.
+
+    **Client registration** — POST to `https://oidc.{region}.amazonaws.com/client/register` with:
+
+    ```json
+    {
+      "clientName": "Kiro Account Manager",
+      "clientType": "public",
+      "scopes": [
+        "codewhisperer:completions",
+        "codewhisperer:analysis",
+        "codewhisperer:conversations",
+        "codewhisperer:transformations",
+        "codewhisperer:taskassist"
+      ],
+      "grantTypes": [
+        "urn:ietf:params:oauth:grant-type:device_code",
+        "refresh_token"
+      ],
+      "issuerUrl": "https://view.awsapps.com/start"
+    }
+    ```
+
+    The response contains `clientId` and `clientSecret`.
+
+    **Device authorization** — POST to `https://oidc.{region}.amazonaws.com/device_authorization` with `{ clientId, clientSecret, startUrl }`. The response contains `deviceCode`, `userCode`, `verificationUri` (and optionally `verificationUriComplete`), `interval`, and `expiresIn`.
+
+    The default region is `us-east-1`, configurable via `--region`.
+  </Step>
+
+  <Step title="Obtain a disposable email address">
+    `createTempMail()` in `lib/register.ts` tries up to six email providers in sequence until one succeeds. See [Disposable email providers](/internals/temp-mail) for the full provider list, API details, and fallback behavior.
+
+    On success it returns `{ email, token, password }`. The password is a randomly generated string used both for the temp mail account and as the AWS registration password.
+  </Step>
+
+  <Step title="Launch headless Chromium">
+    `registerAwsBuilderIdTempMail()` launches a headless Chromium instance via Playwright (`chromium.launch()`). Key launch options:
+
+    - `headless: true`
+    - `--disable-blink-features=AutomationControlled` to suppress the automation flag
+    - Optional `proxy: { server: proxyUrl }` when `--proxy` / `--proxyUrl` is set
+    - Incognito mode is on by default (`--incognito` flag)
+
+    When fingerprint mode is enabled (default), a `FingerprintGenerator` produces a randomized profile covering `userAgent`, `platform`, screen dimensions, `hardwareConcurrency`, `deviceMemory`, locale, and timezone. A `FingerprintInjector` injects the corresponding override script via `page.addInitScript()` before any navigation.
+  </Step>
+
+  <Step title="Navigate to the verification URI">
+    The browser navigates to `verificationUri` (from step 1), which is the `verificationUriComplete` form when available — this pre-fills the `user_code` query parameter so no manual code entry is needed. The default fallback URL pattern is `https://view.awsapps.com/start/#/device?user_code=<CODE>`.
+
+    The page waits for `networkidle` with a 60-second timeout before proceeding.
+  </Step>
+
+  <Step title="Automate the registration form">
+    Before interacting with any form field, `simulatePreRegistrationBehavior()` runs three rounds of anti-detection warm-up:
+
+    - **3 page scrolls** — random direction and amount (100–300 px) with 300–800 ms pauses between each
+    - **2 random mouse moves** — target coordinates chosen randomly within the viewport
+
+    The automation then fills three fields:
+
+    | Field | Value |
+    |---|---|
+    | Email | Address obtained from the temp mail provider |
+    | Full name | Random pick from `FIRST_NAMES` × `LAST_NAMES` arrays (e.g. "Maria Johnson") |
+    | Password | The generated password from the temp mail result |
+
+    Every field interaction follows the same human-like typing pattern via `waitAndFill()`:
+    1. Move the mouse to the field center along a quadratic Bézier curve (5–15 steps)
+    2. Click the field
+    3. Clear existing content
+    4. Type each character individually with a random delay of **50–150 ms per character**
+
+    Mouse trajectories are simulated in `simulateMouseMove()` using the quadratic Bézier formula:
+
+    ```typescript
+    const pointX = (1 - t) * (1 - t) * 0 + 2 * (1 - t) * t * controlX + t * t * targetX
+    const pointY = (1 - t) * (1 - t) * 0 + 2 * (1 - t) * t * controlY + t * t * targetY
+    ```
+
+    The control point is offset by up to ±25 px from the midpoint in each axis.
+  </Step>
+
+  <Step title="Poll the temp email inbox for the verification code">
+    `getTempMailCode(token, email, log, timeout)` polls the appropriate provider API every **3 seconds** for up to 120 seconds (configurable).
+
+    Incoming messages are filtered to AWS senders (`no-reply@signin.aws`, `no-reply@login.awsapps.com`, `noreply@amazon.com`, `account-update@amazon.com`, `no-reply@aws.amazon.com`, `noreply@aws.amazon.com`, `aws`).
+
+    Code extraction uses four regex patterns applied to the plain-text body, HTML body, and subject in sequence:
+
+    ```typescript
+    const CODE_PATTERNS = [
+      /(?:verification\s*code|验证码|Your code is|code is)[：:\s]*(\d{6})/gi,
+      /(?:is|为)[：:\s]*(\d{6})\b/gi,
+      /^\s*(\d{6})\s*$/gm,
+      />\s*(\d{6})\s*</g,
+    ]
+    ```
+
+    False positives are suppressed: matches preceded by `#` (CSS hex colors), matches inside `color:` declarations, matches inside `rgb`/`rgba`/`hsl` values, and numbers with 7 or more digits are all discarded.
+  </Step>
+
+  <Step title="Submit the verification code and complete authorization">
+    The 6-digit code is typed into the `input[placeholder="6-digit"]` field using the same human-like typing helper. The continue/confirm button is then clicked. If AWS returns an error alert (detected by checking `div[role="alert"]` and various `awsui_content_` selectors), the tool closes the dialog and retries the button click up to 5 times with a 3-second delay between attempts.
+  </Step>
+
+  <Step title="Poll the token endpoint for credentials">
+    After the browser automation completes, `pollBuilderIdDeviceAuth()` in `lib/auth.ts` polls `https://oidc.{region}.amazonaws.com/token` with:
+
+    ```json
+    {
+      "clientId": "...",
+      "clientSecret": "...",
+      "grantType": "urn:ietf:params:oauth:grant-type:device_code",
+      "deviceCode": "..."
+    }
+    ```
+
+    - HTTP 200 → authorization complete; response contains `accessToken`, `refreshToken`, and `expiresIn`
+    - `authorization_pending` → wait and retry
+    - `slow_down` → increase the polling interval by 5 seconds
+    - `expired_token` or `access_denied` → abort with an error
+
+    On success the script writes a `BuilderIdTemplateItem` record (including `refreshToken`, `clientId`, `clientSecret`) to `show/builderid-template.json` for use by the account-switching tool.
+  </Step>
+</Steps>
+
+<Note>
+The polling interval starts at the value returned by the `device_authorization` endpoint (defaulting to 5 seconds) and is stored in `BuilderIdStartResult.interval`. It increases automatically when AWS responds with `slow_down`.
+</Note>
+
+## Anti-detection measures
+
+kiro-auto applies several layers of bot-detection evasion:
+
+- **Automation flag suppression** — Chromium is launched with `--disable-blink-features=AutomationControlled`, hiding the `navigator.webdriver` property.
+- **Browser fingerprinting** — Each session generates a unique profile (user agent, platform, screen resolution, hardware concurrency, device memory, locale, timezone) injected at the page level before any navigation.
+- **Pre-registration warm-up** — Three scroll events and two random mouse movements run before any form interaction to mimic a real user reading the page.
+- **Human-like typing** — Each keystroke is delayed by a random 50–150 ms interval.
+- **Bézier mouse curves** — Mouse movements follow a quadratic Bézier path with a randomized control point rather than jumping directly to targets.
+- **Incognito context** — Playwright browser contexts are created without persistent cookies or storage by default.
+
+<Tip>
+Use the `--proxy` flag to route both the browser automation and the AWS OIDC HTTP calls through a proxy server, which sets `HTTP_PROXY` / `HTTPS_PROXY` environment variables for the Node.js process as well.
+</Tip>
